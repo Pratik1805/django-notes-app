@@ -1,0 +1,5 @@
+data/
+mysql/
+.git
+__pycache__
+*.pyc
