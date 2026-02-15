@@ -1,68 +1,79 @@
+#Phase 1: db starts first. It initializes MySQL.
+
+#Phase 2: django_app is "created" but waits. It watches db. 
+          #Once db reports "Healthy" (via the ping check), django_app starts.
+
+#Phase 3: django_app runs migrations and starts Gunicorn.
+
+#Phase 4: nginx is "created" but waits. It watches django_app. 
+          #Once django_app reports "Healthy" (port 8000 is open), 
+          #nginx starts and opens Port 80 to the world.
+
 version: "3.8"
 
 services:
-  nginx:
-    build:
-      context: ./nginx
-    container_name: nginx_cont
-    image: nginx
-    ports:
-      - "80:80"
-    networks:
-      - notes-app-nw
-    restart: always
-    depends_on:
-      - django_app
+  nginx:
+    build:
+      context: ./nginx
+    container_name: nginx_cont
+    image: nginx
+    ports:
+      - "80:80"
+    networks:
+      - notes-app
+    restart: always
+    depends_on:
+       django_app:
+         condition: service_healthy
 
-  db:
-    image: mysql:8.0
-    container_name: db_cont
-    # Industry Standard: DB credentials should be injected via environment variables
-    environment:
-      MYSQL_ROOT_PASSWORD: root_secure_password
-      MYSQL_DATABASE: test_db
-      MYSQL_USER: django_user
-      MYSQL_PASSWORD: django_password
-    # Using a Named Volume to prevent "Permission Denied" errors common with bind mounts
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: always
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "django_user", "-p", "django_password"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - notes-app-nw
+  db:
+    container_name: db_cont
+    image: mysql:8.0
+    ports:
+      - "3306:3306"
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: test_db
+    volumes:
+      - mysql-data:/var/lib/mysql
+    networks:
+      - notes-app
+    restart: always
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
 
-  django_app:
-    build:
-      context: .
-    image: jsilverhand18/notes-app:latest
-    container_name: django_cont
-    # Fix: This loop ensures Django waits for MySQL to be fully initialized before migrating
-    command: sh -c "while ! nc -z db 3306; do echo 'Waiting for MySQL...'; sleep 1; done; python manage.py migrate --noinput && gunicorn notesapp.wsgi --bind 0.0.0.0:8000"
-    ports:
-      - "8000:8000"
-    env_file:
-      - ".env"
-    depends_on:
-      - db
-    restart: always
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/admin || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - notes-app-nw
+  django_app:
+    image: jsilverhand18/notes-app:latest
+    container_name: django_cont
+    ports:
+      - "8000:8000"
+        #command: sh -c "python manage.py migrate --noinput && gunicorn notesapp.wsgi --bind 0.0.0.0:8000"
+    command: >
+      sh -c "python manage.py migrate --noinput &&
+              gunicorn notesapp.wsgi:application --bind 0.0.0.0:8000"
+    env_file:
+      - ".env"
+    networks:
+      - notes-app
+    restart: always
+    depends_on:
+       db:
+         condition: service_healthy
 
-# Define the named volume managed by the Docker Engine
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - "python -c 'import socket; s=socket.socket(); s.connect((\"127.0.0.1\", 8000))' || exit 1"
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
 volumes:
-  mysql_data:
-
+  mysql-data:
 networks:
-  notes-app-nw:
-    driver: bridge
+  notes-app:
