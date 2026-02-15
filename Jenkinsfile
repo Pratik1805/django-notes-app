@@ -1,29 +1,50 @@
-@Library('Shared')_
+@Library("Shared") _
 pipeline{
-    agent { label 'dev-server'}
+    agent {label "agent-1"}
     
     stages{
-        stage("Code clone"){
+        stage("Code"){
             steps{
-                sh "whoami"
-            clone("https://github.com/LondheShubham153/django-notes-app.git","main")
+                script{
+                    clone("https://github.com/Pratik1805/django-notes-app.git","main")
+                }
             }
         }
-        stage("Code Build"){
+        stage("Build"){
             steps{
-            dockerbuild("notes-app","latest")
+                script{
+                    docker_build("jsilverhand18","notes-app","latest")
+                }
+            }
+        }
+        stage("Test"){
+            steps{
+                echo  "This is Testing the code"
             }
         }
         stage("Push to DockerHub"){
             steps{
-                dockerpush("dockerHubCreds","notes-app","latest")
+                script{
+                    docker_push("notes-app","latest","jsilverhand18")
+                }
             }
         }
         stage("Deploy"){
             steps{
-                deploy()
+                echo  "This is Deploying the code"
+                sh "docker compose up -d"
+                echo "Deploying done"
             }
         }
-        
     }
+ post {
+        success {
+            echo "Deployment successful!"
+        }
+        always {
+            // Clean up only 'dangling' images to keep the build fast
+            sh 'docker image prune -f'
+        }
+    }
+    
 }
